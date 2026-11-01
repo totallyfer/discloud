@@ -15,21 +15,21 @@ const client = new Client({
   ]
 });
 
-// Comandos Slash Avançados
+// Registrar Comandos Slash
 const commands = [
   new SlashCommandBuilder()
     .setName('config')
     .setDescription('Painel avançado de configuração da loja')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
-      sub.setName('shop').setDescription('Gerencia produtos, cupons, Pix e cargos do sistema de vendas')
+      sub.setName('shop').setDescription('Gerencia produtos, cupons, Pix, cargos e visual da loja')
     ),
   new SlashCommandBuilder()
     .setName('start')
     .setDescription('Envia o painel profissional de atendimento e vendas')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
-      sub.setName('shop').setDescription('Envia o painel avançado em um canal específico')
+      sub.setName('shop').setDescription('Envia o painel configurado em um canal específico')
         .addChannelOption(option =>
           option.setName('canal').setDescription('Canal onde o painel será enviado').setRequired(true)
             .addChannelTypes(ChannelType.GuildText)
@@ -38,11 +38,11 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
-  console.log(`Bot conectado como ${client.user.tag} (Sistema Avançado)`);
+  console.log(`Bot conectado como ${client.user.tag} (Loja Completa com Aprovação de Staff)`);
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('Comandos avançados registrados com sucesso.');
+    console.log('Comandos slash registrados com sucesso.');
   } catch (error) {
     console.error(error);
   }
@@ -51,34 +51,51 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   db.read();
 
+  // Configurações padrão de visual e cargos
+  db.data.shopEmbed = db.data.shopEmbed || {
+    title: '🛒 Central de Atendimento & Vendas',
+    description: 'Seja muito bem-vindo(a) à nossa central de vendas automatizada!\n\nClique no botão abaixo para abrir seu carrinho.',
+    color: '#9D00FF',
+    image: 'https://images.unsplash.com/photo-1607532940433-1d604d1efc91?w=800&auto=format&fit=crop&q=60'
+  };
+  db.data.staffRoleId = db.data.staffRoleId || null;
+  db.data.tickets = db.data.tickets || {};
+
   if (interaction.isChatInputCommand()) {
     const { commandName, options } = interaction;
 
     if (commandName === 'config') {
       if (options.getSubcommand() === 'shop') {
+        const staffRoleText = db.data.staffRoleId ? `<@&${db.data.staffRoleId}>` : 'Não configurado (Apenas Admins)';
+
         const embed = new EmbedBuilder()
           .setTitle('⚙️ Painel de Controle Avançado da Loja')
-          .setDescription('Gerencie todos os parâmetros da sua loja virtual através dos botões abaixo:')
+          .setDescription('Gerencie produtos, cupons, chaves Pix, **cargo da equipe** e personalize a embed:')
           .addFields(
-            { name: '📦 Produtos Ativos', value: `${Object.keys(db.data.products).length} cadastrados`, inline: true },
-            { name: '🎟️ Cupons Disponíveis', value: `${Object.keys(db.data.coupons).length} ativos`, inline: true },
-            { name: '💳 Status do Pix', value: db.data.pix.value ? 'Configurado ✅' : 'Não configurado ❌', inline: true }
+            { name: '📦 Produtos', value: `${Object.keys(db.data.products).length} cadastrados`, inline: true },
+            { name: '💳 Pix', value: db.data.pix.value ? 'Configurado ✅' : 'Pendente ❌', inline: true },
+            { name: '🛡️ Cargo de Aprovação', value: staffRoleText, inline: true }
           )
           .setColor('#8A2BE2');
 
         const row1 = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('cfg_add_prod').setLabel('➕ Adicionar Produto').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('cfg_del_prod').setLabel('🗑️ Remover Produto').setStyle(ButtonStyle.Danger),
-          new ButtonBuilder().setCustomId('cfg_list_prod').setLabel('📦 Listar Produtos').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId('cfg_add_prod').setLabel('➕ Add Produto').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('cfg_del_prod').setLabel('🗑️ Del Produto').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('cfg_list_prod').setLabel('📦 Ver Produtos').setStyle(ButtonStyle.Secondary)
         );
 
         const row2 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('cfg_pix').setLabel('💳 Configurar Pix').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId('cfg_coupon').setLabel('🎟️ Criar Cupom').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('cfg_list_coupons').setLabel('📋 Ver Cupons').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId('cfg_set_role').setLabel('🛡️ Configurar Cargo Staff').setStyle(ButtonStyle.Secondary)
         );
 
-        await interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
+        const row3 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('cfg_edit_embed').setLabel('✏️ Personalizar Embed').setStyle(ButtonStyle.Secondary).setEmoji('🎨'),
+          new ButtonBuilder().setCustomId('cfg_preview_embed').setLabel('👁️ Visualizar Embed').setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.reply({ embeds: [embed], components: [row1, row2, row3], ephemeral: true });
       }
     }
 
@@ -88,17 +105,13 @@ client.on('interactionCreate', async interaction => {
         db.data.shopChannel = channel.id;
         db.write();
 
+        const cfg = db.data.shopEmbed;
         const shopEmbed = new EmbedBuilder()
-          .setTitle('🛒 Central de Atendimento & Vendas - Loja Oficial')
-          .setDescription('Seja muito bem-vindo(a) à nossa central de vendas automatizada!\n\n' +
-                          '✨ **Como comprar?**\n' +
-                          '1️⃣ Clique no botão **"🛒 Abrir Carrinho"** abaixo.\n' +
-                          '2️⃣ Selecione os produtos desejados no seu canal privado.\n' +
-                          '3️⃣ Insira cupons de desconto (se tiver) e realize o pagamento via Pix.\n\n' +
-                          '🔒 *Atendimento rápido, seguro e automatizado.*')
-          .setColor('#9D00FF')
-          .setImage('https://images.unsplash.com/photo-1607532940433-1d604d1efc91?w=800&auto=format&fit=crop&q=60') // Imagem ilustrativa elegante de loja
-          .setFooter({ text: 'Sistema de Vendas • Todos os direitos reservados' });
+          .setTitle(cfg.title)
+          .setDescription(cfg.description)
+          .setColor(cfg.color)
+          .setImage(cfg.image)
+          .setFooter({ text: 'Sistema de Vendas Automatizado' });
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('open_ticket').setLabel('🛒 Abrir Carrinho / Comprar').setStyle(ButtonStyle.Success).setEmoji('💳'),
@@ -106,68 +119,74 @@ client.on('interactionCreate', async interaction => {
         );
 
         await channel.send({ embeds: [shopEmbed], components: [row] });
-        await interaction.reply({ content: `✅ Painel avançado de vendas enviado com sucesso para ${channel}!`, ephemeral: true });
+        await interaction.reply({ content: `✅ Painel de vendas publicado em ${channel}!`, ephemeral: true });
       }
     }
   }
 
-  // --- BOTÕES DE CONFIGURAÇÃO E INTERAÇÃO ---
+  // --- BOTÕES DE GERENCIAMENTO DA CONFIG ---
   else if (interaction.isButton()) {
     const { customId } = interaction;
 
     if (customId === 'cfg_add_prod') {
       const modal = new ModalBuilder().setCustomId('modal_add_prod').setTitle('Cadastrar Novo Produto');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_id').setLabel('ID Único (ex: rank_vip)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_id').setLabel('ID Único (ex: vip1)').setStyle(TextInputStyle.Short).setRequired(true)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_name').setLabel('Nome do Produto').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_price').setLabel('Preço (Apenas números, ex: 25.90)').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_desc').setLabel('Descrição Detalhada').setStyle(TextInputStyle.Paragraph).setRequired(true))
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_price').setLabel('Preço (Apenas números, ex: 15.00)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_desc').setLabel('Descrição').setStyle(TextInputStyle.Paragraph).setRequired(true))
       );
       await interaction.showModal(modal);
     }
 
     if (customId === 'cfg_pix') {
-      const modal = new ModalBuilder().setCustomId('modal_set_pix').setTitle('Configurar Pagamento Pix');
+      const modal = new ModalBuilder().setCustomId('modal_set_pix').setTitle('Configurar Pix');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pix_type').setLabel('Tipo (Chave CPF, CNPJ, Email, Tel)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pix_type').setLabel('Tipo (Chave, CNPJ, Email, Tel)').setStyle(TextInputStyle.Short).setRequired(true)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pix_val').setLabel('Chave Pix ou Código Copia e Cola').setStyle(TextInputStyle.Paragraph).setRequired(true))
       );
       await interaction.showModal(modal);
     }
 
-    if (customId === 'cfg_coupon') {
-      const modal = new ModalBuilder().setCustomId('modal_add_coupon').setTitle('Criar Cupom de Desconto');
+    if (customId === 'cfg_set_role') {
+      const modal = new ModalBuilder().setCustomId('modal_set_role').setTitle('Configurar Cargo da Staff');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('coupon_code').setLabel('Código do Cupom (ex: DESCONTO10)').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('coupon_disc').setLabel('Porcentagem de Desconto (ex: 15 para 15%)').setStyle(TextInputStyle.Short).setRequired(true))
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('role_id').setLabel('ID do Cargo que pode Aprovar Pagamentos').setStyle(TextInputStyle.Short).setRequired(true))
       );
       await interaction.showModal(modal);
     }
 
+    if (customId === 'cfg_edit_embed') {
+      const cfg = db.data.shopEmbed;
+      const modal = new ModalBuilder().setCustomId('modal_edit_embed').setTitle('Personalizar Embed da Loja');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('embed_title').setLabel('Título da Embed').setValue(cfg.title).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('embed_desc').setLabel('Descrição').setValue(cfg.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('embed_color').setLabel('Cor Hex (ex: #9D00FF)').setValue(cfg.color).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('embed_image').setLabel('URL do Banner').setValue(cfg.image).setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      await interaction.showModal(modal);
+    }
+
+    if (customId === 'cfg_preview_embed') {
+      const cfg = db.data.shopEmbed;
+      const previewEmbed = new EmbedBuilder()
+        .setTitle(cfg.title)
+        .setDescription(cfg.description)
+        .setColor(cfg.color)
+        .setImage(cfg.image)
+        .setFooter({ text: 'Pré-visualização da Loja' });
+      await interaction.reply({ embeds: [previewEmbed], ephemeral: true });
+    }
+
     if (customId === 'cfg_list_prod') {
       const prods = Object.entries(db.data.products);
-      if (prods.length === 0) return interaction.reply({ content: '⚠️ Nenhum produto cadastrado no momento.', ephemeral: true });
-      
-      const list = prods.map(([id, p]) => `🔹 **ID:** \`${id}\` | **Nome:** ${p.name} | **Preço:** R$ ${p.price}\n*${p.desc}*`).join('\n\n');
-      await interaction.reply({ content: `📦 **Lista de Produtos Ativos:**\n\n${list}`, ephemeral: true });
+      if (prods.length === 0) return interaction.reply({ content: '⚠️ Nenhum produto cadastrado.', ephemeral: true });
+      const list = prods.map(([id, p]) => `🔹 **ID:** \`${id}\` | **Nome:** ${p.name} | **Preço:** R$ ${p.price}`).join('\n');
+      await interaction.reply({ content: `📦 **Produtos:**\n\n${list}`, ephemeral: true });
     }
 
-    if (customId === 'cfg_list_coupons') {
-      const coupons = Object.entries(db.data.coupons);
-      if (coupons.length === 0) return interaction.reply({ content: '⚠️ Nenhum cupom cadastrado.', ephemeral: true });
-      
-      const list = coupons.map(([code, c]) => `🎟️ **Cupom:** \`${code}\` | **Desconto:** ${c.discount}%`).join('\n');
-      await interaction.reply({ content: `📋 **Cupons Ativos:**\n\n${list}`, ephemeral: true });
-    }
-
-    if (customId === 'faq_rules') {
-      await interaction.reply({ 
-        content: '📜 **Termos da Loja:**\n1. Após o pagamento via Pix, envie o comprovante no canal do carrinho.\n2. O prazo de entrega pode variar de minutos a 24 horas úteis.\n3. Reembolsos apenas mediante análise prévia da administração.', 
-        ephemeral: true 
-      });
-    }
-
-    // --- ABRIR CARRINHO (TICKET) ---
+    // --- ABRIR TICKET / CARRINHO ---
     if (customId === 'open_ticket') {
       const guild = interaction.guild;
       const channelName = `carrinho-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -182,73 +201,116 @@ client.on('interactionCreate', async interaction => {
         ]
       });
 
+      // Salva o dono do ticket
+      db.data.tickets[ticketChannel.id] = { ownerId: interaction.user.id };
+      db.write();
+
       const products = Object.entries(db.data.products);
-      
       if (products.length === 0) {
-        await ticketChannel.send({ content: `${interaction.user}, seu carrinho foi aberto, mas infelizmente não há produtos cadastrados no momento.` });
-        return interaction.reply({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
+        await ticketChannel.send({ content: `${interaction.user}, carrinho aberto, mas não há produtos cadastrados.` });
+        return interaction.reply({ content: `✅ Carrinho criado: ${ticketChannel}`, ephemeral: true });
       }
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId('select_product')
-        .setPlaceholder('🛒 Selecione o produto que deseja adquirir')
+        .setPlaceholder('🛒 Selecione o produto desejado')
         .addOptions(products.map(([id, p]) => ({
           label: p.name,
-          description: `Preço: R$ ${p.price} - ${p.desc.substring(0, 50)}`,
+          description: `Preço: R$ ${p.price}`,
           value: id
         })));
 
       const row = new ActionRowBuilder().addComponents(selectMenu);
       
-      const welcomeEmbed = new EmbedBuilder()
-        .setTitle(`🛒 Carrinho de Compras - ${interaction.user.username}`)
-        .setDescription('Selecione abaixo o produto que você deseja comprar para prosseguir com o pagamento.')
-        .setColor('#8A2BE2');
-
       await ticketChannel.send({ 
-        content: `Olá ${interaction.user}, este é o seu canal de atendimento exclusivo!`, 
-        embeds: [welcomeEmbed], 
+        content: `Olá ${interaction.user}, selecione o produto que deseja comprar abaixo:`, 
         components: [row] 
       });
 
       await interaction.reply({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
     }
 
-    // Ações dentro do Carrinho
-    if (customId === 'close_ticket') {
-      await interaction.reply({ content: '🔒 Fechando este carrinho em 5 segundos...' });
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+    // Copiar Chave Pix
+    if (customId === 'copy_pix_key') {
+      const pixValue = db.data.pix.value || 'Chave Pix não configurada.';
+      await interaction.reply({ content: `📋 **Código Pix Copia e Cola:**\n\`\`\`text\n${pixValue}\n\`\`\``, ephemeral: true });
     }
 
-    if (customId === 'apply_coupon_modal') {
-      const modal = new ModalBuilder().setCustomId('modal_apply_coupon').setTitle('Aplicar Cupom de Desconto');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('coupon_code_input').setLabel('Digite o código do cupom').setStyle(TextInputStyle.Short).setRequired(true))
-      );
-      await interaction.showModal(modal);
-    }
+    // CLIENTE APERTA EM "CONFIRMAR PAGAMENTO"
+    if (customId === 'notify_payment') {
+      const staffRoleMention = db.data.staffRoleId ? `<@&${db.data.staffRoleId}>` : '@everyone';
 
-    if (customId === 'finish_payment') {
-      const embedStaff = new EmbedBuilder()
-        .setTitle('🚨 Novo Pagamento Informado!')
-        .setDescription(`O cliente ${interaction.user} informou que realizou o pagamento via Pix.\nVerifique o extrato bancário e entregue o produto.`)
-        .setColor('#FFA500')
-        .setTimestamp();
+      const embedNotify = new EmbedBuilder()
+        .setTitle('🚨 Aguardando Validação do Pagamento')
+        .setDescription(`O cliente ${interaction.user} informou que realizou o pagamento!\n\n` +
+                        `Aguardando um membro da equipe com o cargo correto para **Aprovar o Pagamento**.`)
+        .setColor('#FFA500');
 
       const staffRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('approve_payment').setLabel('✅ Aprovar e Entregar').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Canal').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('approve_payment').setLabel('✅ Confirmar Pagamento').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger)
       );
 
-      await interaction.channel.send({ embeds: [embedStaff], components: [staffRow] });
-      await interaction.reply({ content: '✅ Comprovante enviado para a equipe! Aguarde a validação.', ephemeral: true });
+      await interaction.channel.send({ content: staffRoleMention, embeds: [embedNotify], components: [staffRow] });
+      await interaction.reply({ content: '✅ Notificação enviada para a equipe! Aguarde a confirmação do atendente.', ephemeral: true });
     }
 
+    // STAFF APERTA EM "CONFIRMAR PAGAMENTO"
     if (customId === 'approve_payment') {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: '❌ Apenas administradores/moderadores podem aprovar pagamentos.', ephemeral: true });
+      const member = interaction.member;
+      const requiredRoleId = db.data.staffRoleId;
+
+      // Verifica se o usuário tem permissão (Admin ou Cargo configurado)
+      const hasPermission = member.permissions.has(PermissionFlagsBits.ManageGuild) || 
+                            (requiredRoleId && member.roles.cache.has(requiredRoleId));
+
+      if (!hasPermission) {
+        return interaction.reply({ 
+          content: '❌ **Acesso Negado!** Apenas membros autorizados da equipe podem confirmar este pagamento.', 
+          ephemeral: true 
+        });
       }
-      await interaction.update({ content: '✅ **Pagamento Aprovado com Sucesso!** O pedido foi finalizado.', embeds: [], components: [] });
+
+      // Identifica o dono do ticket
+      const ticketInfo = db.data.tickets[interaction.channel.id];
+      const buyerId = ticketInfo ? ticketInfo.ownerId : null;
+
+      // Tenta enviar mensagem na DM do cliente
+      if (buyerId) {
+        try {
+          const buyer = await client.users.fetch(buyerId);
+          const dmEmbed = new EmbedBuilder()
+            .setTitle('🎉 Compra Aprovada!')
+            .setDescription(`Seu pagamento no servidor **${interaction.guild.name}** foi confirmado com sucesso!\n\nRetorne ao canal do seu ticket para receber o seu produto.`)
+            .setColor('#00FF7F')
+            .setTimestamp();
+          await buyer.send({ embeds: [dmEmbed] });
+        } catch (e) {
+          console.log('Não foi possível enviar mensagem na DM do usuário (DM fechada).');
+        }
+      }
+
+      // Mensagem no Ticket
+      const approvedEmbed = new EmbedBuilder()
+        .setTitle('✅ Compra Aprovada com Sucesso!')
+        .setDescription('**Seu pagamento foi confirmado! Espere seu produto ser entregue pela equipe.**')
+        .setColor('#00FF7F')
+        .setFooter({ text: `Aprovado por ${interaction.user.tag}` });
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger)
+      );
+
+      await interaction.update({ embeds: [approvedEmbed], components: [closeRow] });
+    }
+
+    if (customId === 'close_ticket') {
+      await interaction.reply({ content: '🔒 Fechando este canal em 5 segundos...' });
+      setTimeout(() => {
+        delete db.data.tickets[interaction.channel.id];
+        db.write();
+        interaction.channel.delete().catch(() => {});
+      }, 5000);
     }
   }
 
@@ -262,8 +324,6 @@ client.on('interactionCreate', async interaction => {
       if (!product) return interaction.reply({ content: '❌ Produto não encontrado.', ephemeral: true });
 
       let qrCodeAttachment = null;
-      let pixValue = pix.value || 'Pix não configurado pelo administrador.';
-
       if (pix.value) {
         try {
           const buffer = await QRCode.toBuffer(pix.value);
@@ -276,21 +336,20 @@ client.on('interactionCreate', async interaction => {
       const checkoutEmbed = new EmbedBuilder()
         .setTitle(`💳 Checkout - ${product.name}`)
         .setDescription(`Você selecionou **${product.name}**.\n\n` +
-                        `💰 **Valor a Pagar:** \`R$ ${product.price}\`\n\n` +
-                        `📲 **Dados para Pagamento (Pix):**\n\`\`\`text\n${pixValue}\n\`\`\`\n` +
-                        `*Escaneie o QR Code abaixo ou utilize a chave Pix Copia e Cola.*`)
+                        `💰 **Valor:** \`R$ ${product.price}\`\n\n` +
+                        `📲 *Escaneie o QR Code abaixo ou clique no botão para copiar a chave Pix.*`)
         .setColor('#00FF7F');
 
       if (qrCodeAttachment) checkoutEmbed.setImage('attachment://qrcode.png');
 
       const actionRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('finish_payment').setLabel('✅ Já fiz o pagamento').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('apply_coupon_modal').setLabel('🎟️ Inserir Cupom').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('copy_pix_key').setLabel('📋 Copiar Pix').setStyle(ButtonStyle.Primary).setEmoji('🔑'),
+        new ButtonBuilder().setCustomId('notify_payment').setLabel('📩 Notificar Pagamento').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('close_ticket').setLabel('❌ Cancelar').setStyle(ButtonStyle.Danger)
       );
 
       await interaction.update({ 
-        content: '🛒 **Produto selecionado!** Realize o pagamento via Pix abaixo:', 
+        content: '🛒 **Produto Selecionado!** Efetue o pagamento abaixo:', 
         embeds: [checkoutEmbed], 
         files: qrCodeAttachment ? [qrCodeAttachment] : [],
         components: [actionRow] 
@@ -298,7 +357,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // --- CADASTROS VIA MODAL ---
+  // --- MODAIS ---
   else if (interaction.isModalSubmit()) {
     if (interaction.customId === 'modal_add_prod') {
       const id = interaction.fields.getTextInputValue('prod_id').toLowerCase();
@@ -308,8 +367,7 @@ client.on('interactionCreate', async interaction => {
 
       db.data.products[id] = { name, price, desc };
       db.write();
-
-      await interaction.reply({ content: `✅ Produto **${name}** (\`${id}\`) cadastrado com sucesso!`, ephemeral: true });
+      await interaction.reply({ content: `✅ Produto **${name}** cadastrado!`, ephemeral: true });
     }
 
     if (interaction.customId === 'modal_set_pix') {
@@ -318,29 +376,26 @@ client.on('interactionCreate', async interaction => {
 
       db.data.pix = { type, value };
       db.write();
-
-      await interaction.reply({ content: `✅ Chave/QR Code Pix configurado com sucesso!`, ephemeral: true });
+      await interaction.reply({ content: `✅ Dados do Pix salvos!`, ephemeral: true });
     }
 
-    if (interaction.customId === 'modal_add_coupon') {
-      const code = interaction.fields.getTextInputValue('coupon_code').toUpperCase();
-      const discount = interaction.fields.getTextInputValue('coupon_disc');
+    if (interaction.customId === 'modal_set_role') {
+      const roleId = interaction.fields.getTextInputValue('role_id').trim();
+      db.data.staffRoleId = roleId;
+      db.write();
+      await interaction.reply({ content: `✅ Cargo da equipe atualizado para <@&${roleId}>!`, ephemeral: true });
+    }
 
-      db.data.coupons[code] = { discount };
+    if (interaction.customId === 'modal_edit_embed') {
+      const title = interaction.fields.getTextInputValue('embed_title');
+      const description = interaction.fields.getTextInputValue('embed_desc').replace(/\\n/g, '\n');
+      const color = interaction.fields.getTextInputValue('embed_color');
+      const image = interaction.fields.getTextInputValue('embed_image');
+
+      db.data.shopEmbed = { title, description, color, image };
       db.write();
 
-      await interaction.reply({ content: `✅ Cupom **${code}** (${discount}% de desconto) criado com sucesso!`, ephemeral: true });
-    }
-
-    if (interaction.customId === 'modal_apply_coupon') {
-      const code = interaction.fields.getTextInputValue('coupon_code_input').toUpperCase();
-      const coupon = db.data.coupons[code];
-
-      if (!coupon) {
-        return interaction.reply({ content: '❌ Cupom inválido ou expirado.', ephemeral: true });
-      }
-
-      await interaction.reply({ content: `🎉 Cupom **${code}** aplicado com sucesso! **${coupon.discount}% de desconto** concedido. (Apresente este valor com desconto ao efetuar o Pix).`, ephemeral: true });
+      await interaction.reply({ content: `✅ **Embed atualizada com sucesso!**`, ephemeral: true });
     }
   }
 });
