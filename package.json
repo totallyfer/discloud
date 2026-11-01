@@ -7,7 +7,6 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "lowdb": "^3.0.0",
     "qrcode": "^1.5.3"
   }
 }
