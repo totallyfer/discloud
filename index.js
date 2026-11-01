@@ -38,7 +38,7 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
-  console.log(`Bot conectado como ${client.user.tag} (Loja Estilo Customizado)`);
+  console.log(`Bot conectado como ${client.user.tag} (Painel Padrão Visual IDêntico)`);
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
@@ -48,19 +48,22 @@ client.once('ready', async () => {
   }
 });
 
+const userSessions = new Map();
+
 client.on('interactionCreate', async interaction => {
   db.read();
 
-  // Valores padrão de inicialização
+  // Valores padrão estruturados igualzinho ao modelo de referência
   db.data.shopEmbed = db.data.shopEmbed || {
     title: '🛒 Compre Aqui',
-    description: '✨ **ESCOLHA UMA DAS OPÇÕES PARA COMPRAR!**\n\n• **Comprar:** Escolha seus produtos, aplique cupons e crie seu carrinho de forma automática.\n• **Criar Carrinho:** Monte seu carrinho livremente pelo Discord.',
+    description: '✨ **ESCOLHA UMA DAS OPÇÕES PARA COMPRAR!**\n\n' +
+                  '• **Criar Carrinho:** Monte seu carrinho, escolha o item e insira cupons antes de abrir o atendimento.\n' +
+                  '• **Atendente:** Tire suas dúvidas diretamente com nossa equipe.',
     color: '#E02B2B',
     image: 'https://images.unsplash.com/photo-1607532940433-1d604d1efc91?w=800&auto=format&fit=crop&q=60'
   };
   db.data.staffRoleId = db.data.staffRoleId || null;
   db.data.tickets = db.data.tickets || {};
-  db.data.userCoupons = db.data.userCoupons || {}; // Guarda cupons temporários por usuário
 
   if (interaction.isChatInputCommand()) {
     const { commandName, options } = interaction;
@@ -107,26 +110,27 @@ client.on('interactionCreate', async interaction => {
         db.write();
 
         const cfg = db.data.shopEmbed;
+        
+        // A ordem exata: Título ➔ Descrição ➔ Imagem/Banner embaixo
         const shopEmbed = new EmbedBuilder()
           .setTitle(cfg.title)
           .setDescription(cfg.description)
           .setColor(cfg.color)
-          .setImage(cfg.image)
-          .setFooter({ text: 'Sistema de Vendas Automatizado' });
+          .setImage(cfg.image); // Banner posicionado exatamente abaixo da descrição
 
-        // Apenas os dois botões solicitados no estilo da imagem
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('btn_buy_flow').setLabel('Comprar').setStyle(ButtonStyle.Danger).setEmoji('🛒'),
-          new ButtonBuilder().setCustomId('open_ticket').setLabel('Criar Carrinho').setStyle(ButtonStyle.Success).setEmoji('🛍️')
+        // Botões idênticos ao layout da imagem de referência
+        const row1 = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('btn_create_cart').setLabel('Criar Carrinho').setStyle(ButtonStyle.Success).setEmoji('🛍️'),
+          new ButtonBuilder().setCustomId('btn_support').setLabel('Atendente').setStyle(ButtonStyle.Danger).setEmoji('🎧')
         );
 
-        await channel.send({ embeds: [shopEmbed], components: [row] });
-        await interaction.reply({ content: `✅ Painel de vendas estilo customizado publicado em ${channel}!`, ephemeral: true });
+        await channel.send({ embeds: [shopEmbed], components: [row1] });
+        await interaction.reply({ content: `✅ Painel de vendas estilo idêntico publicado em ${channel}!`, ephemeral: true });
       }
     }
   }
 
-  // --- BOTÕES DE GERENCIAMENTO E FLUXO ---
+  // --- INTERAÇÕES DE BOTÕES E FLUXO ---
   else if (interaction.isButton()) {
     const { customId } = interaction;
 
@@ -185,8 +189,7 @@ client.on('interactionCreate', async interaction => {
         .setTitle(cfg.title)
         .setDescription(cfg.description)
         .setColor(cfg.color)
-        .setImage(cfg.image)
-        .setFooter({ text: 'Pré-visualização da Loja' });
+        .setImage(cfg.image);
       await interaction.reply({ embeds: [previewEmbed], ephemeral: true });
     }
 
@@ -197,16 +200,41 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: `📦 **Produtos:**\n\n${list}`, ephemeral: true });
     }
 
-    // --- BOTÃO "COMPRAR" (Escolher Produto -> Inserir Cupom -> Criar Carrinho) ---
-    if (customId === 'btn_buy_flow') {
+    // Botão "Atendente" (Suporte)
+    if (customId === 'btn_support') {
+      const guild = interaction.guild;
+      const supportChannel = await guild.channels.create({
+        name: `suporte-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        type: ChannelType.GuildText,
+        permissionOverwrites: [
+          { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+        ]
+      });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Atendimento').setStyle(ButtonStyle.Danger)
+      );
+
+      await supportChannel.send({ 
+        content: `Olá ${interaction.user}, um atendente já irá lhe ajudar em breve!`, 
+        components: [row] 
+      });
+
+      await interaction.reply({ content: `✅ Canal de atendimento criado: ${supportChannel}`, ephemeral: true });
+    }
+
+    // Botão "Criar Carrinho"
+    if (customId === 'btn_create_cart') {
       const products = Object.entries(db.data.products);
       if (products.length === 0) {
-        return interaction.reply({ content: '⚠️ Não há produtos cadastrados na loja no momento.', ephemeral: true });
+        return interaction.reply({ content: '⚠️ Não há produtos cadastrados no momento.', ephemeral: true });
       }
 
       const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('buy_select_product')
-        .setPlaceholder('🛒 Escolha o produto que deseja comprar')
+        .setCustomId('select_item_cart')
+        .setPlaceholder('📦 Passo 1: Escolha o produto para o carrinho')
         .addOptions(products.map(([id, p]) => ({
           label: p.name,
           description: `Preço: R$ ${p.price}`,
@@ -214,21 +242,24 @@ client.on('interactionCreate', async interaction => {
         })));
 
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      await interaction.reply({ content: '✨ **Passo 1/2:** Selecione o produto desejado abaixo:', components: [row], ephemeral: true });
+      await interaction.reply({ content: '🛒 **Selecione o produto que você deseja colocar no seu carrinho:**', components: [row], ephemeral: true });
     }
 
-    // --- BOTÃO "CRIAR CARRINHO" DIRETO ---
-    if (customId === 'open_ticket') {
-      await criarCarrinhoTicket(interaction, null, null);
+    if (customId === 'btn_confirm_open_ticket') {
+      const session = userSessions.get(interaction.user.id);
+      if (!session) {
+        return interaction.reply({ content: '⚠️ Sua sessão expirou. Clique em **Criar Carrinho** novamente.', ephemeral: true });
+      }
+
+      await criarCarrinhoTicket(interaction, session.productId, session.discount, session.couponCode);
+      userSessions.delete(interaction.user.id);
     }
 
-    // Copiar Chave Pix
     if (customId === 'copy_pix_key') {
       const pixValue = db.data.pix.value || 'Chave Pix não configurada.';
       await interaction.reply({ content: `📋 **Código Pix Copia e Cola:**\n\`\`\`text\n${pixValue}\n\`\`\``, ephemeral: true });
     }
 
-    // CLIENTE APERTA EM "NOTIFICAR PAGAMENTO"
     if (customId === 'notify_payment') {
       const staffRoleMention = db.data.staffRoleId ? `<@&${db.data.staffRoleId}>` : '@everyone';
 
@@ -246,7 +277,6 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: '✅ Notificação enviada para a equipe!', ephemeral: true });
     }
 
-    // STAFF APERTA EM "CONFIRMAR PAGAMENTO"
     if (customId === 'approve_payment') {
       const member = interaction.member;
       const requiredRoleId = db.data.staffRoleId;
@@ -266,7 +296,7 @@ client.on('interactionCreate', async interaction => {
           const buyer = await client.users.fetch(buyerId);
           const dmEmbed = new EmbedBuilder()
             .setTitle('🎉 Compra Aprovada!')
-            .setDescription(`Seu pagamento no servidor **${interaction.guild.name}** foi confirmado com sucesso!\n\nRetorne ao canal do seu ticket para receber o seu produto.`)
+            .setDescription(`Seu pagamento no servidor **${interaction.guild.name}** foi confirmado com sucesso!\n\nRetorne ao seu ticket para receber o seu produto.`)
             .setColor('#00FF7F')
             .setTimestamp();
           await buyer.send({ embeds: [dmEmbed] });
@@ -296,24 +326,27 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // --- SELEÇÃO DO PRODUTO PELO BOTÃO "COMPRAR" ---
   else if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'buy_select_product') {
+    if (interaction.customId === 'select_item_cart') {
       const prodId = interaction.values[0];
       
-      // Pergunta se deseja aplicar cupom antes de abrir o carrinho
-      const modal = new ModalBuilder().setCustomId(`modal_coupon_flow_${prodId}`).setTitle('Aplicar Cupom (Opcional)');
+      const modal = new ModalBuilder().setCustomId(`modal_coupon_cart_${prodId}`).setTitle('Passo 2: Cupom de Desconto');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('coupon_input').setLabel('Código do Cupom (Deixe em branco se não tiver)').setStyle(TextInputStyle.Short).setRequired(false))
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('coupon_input')
+            .setLabel('Possui cupom? Digite-o (ou deixe em branco)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+        )
       );
       await interaction.showModal(modal);
     }
   }
 
-  // --- MODAIS ---
   else if (interaction.isModalSubmit()) {
-    if (interaction.customId.startsWith('modal_coupon_flow_')) {
-      const prodId = interaction.customId.replace('modal_coupon_flow_', '');
+    if (interaction.customId.startsWith('modal_coupon_cart_')) {
+      const prodId = interaction.customId.replace('modal_coupon_cart_', '');
       const couponCode = interaction.fields.getTextInputValue('coupon_input').trim().toUpperCase();
       
       let discount = 0;
@@ -324,7 +357,28 @@ client.on('interactionCreate', async interaction => {
         }
       }
 
-      await criarCarrinhoTicket(interaction, prodId, discount, couponCode);
+      userSessions.set(interaction.user.id, {
+        productId: prodId,
+        discount: discount,
+        couponCode: couponCode
+      });
+
+      const product = db.data.products[prodId];
+      let summaryText = `📦 **Produto:** ${product.name}\n💰 **Preço:** R$ ${product.price}`;
+      if (discount > 0) {
+        const novoValor = parseFloat(product.price) * (1 - discount / 100);
+        summaryText += `\n🎟️ **Cupom:** ${couponCode} (-${discount}%)\n💲 **Valor Final:** R$ ${novoValor.toFixed(2)}`;
+      }
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_confirm_open_ticket').setLabel('🛒 Abrir e Finalizar Carrinho').setStyle(ButtonStyle.Success)
+      );
+
+      await interaction.reply({ 
+        content: `✅ **Configuração Pronta!**\n\n${summaryText}\n\nClique no botão abaixo para abrir o seu ticket privado e realizar o pagamento:`, 
+        components: [row], 
+        ephemeral: true 
+      });
     }
 
     if (interaction.customId === 'modal_add_prod') {
@@ -372,12 +426,11 @@ client.on('interactionCreate', async interaction => {
       db.data.shopEmbed = { title, description, color, image };
       db.write();
 
-      await interaction.reply({ content: `✅ **Embed personalizada atualizada com sucesso!**`, ephemeral: true });
+      await interaction.reply({ content: `✅ **Embed personalizada atualizada!**`, ephemeral: true });
     }
   }
 });
 
-// Função auxiliar para criar o canal do carrinho e exibir o checkout com os valores calculados
 async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode = '') {
   const guild = interaction.guild;
   const channelName = `carrinho-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -395,26 +448,7 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
   db.data.tickets[ticketChannel.id] = { ownerId: interaction.user.id };
   db.write();
 
-  if (!prodId) {
-    // Caso tenha clicado em "Criar Carrinho" direto sem selecionar produto
-    await ticketChannel.send({ content: `${interaction.user}, seu carrinho foi aberto livremente. Aguarde o atendimento da staff.` });
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
-    } else {
-      await interaction.reply({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
-    }
-    return;
-  }
-
   const product = db.data.products[prodId];
-  if (!product) {
-    if (interaction.replied || interaction.deferred) {
-      return interaction.followUp({ content: '❌ Produto selecionado não foi encontrado.', ephemeral: true });
-    } else {
-      return interaction.reply({ content: '❌ Produto selecionado não foi encontrado.', ephemeral: true });
-    }
-  }
-
   let finalPrice = parseFloat(product.price);
   let descText = `Você selecionou **${product.name}**.\n\n💰 **Preço Original:** \`R$ ${product.price}\``;
 
@@ -423,7 +457,7 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
     finalPrice = finalPrice - valorDesconto;
     descText += `\n🎟️ **Cupom Aplicado:** \`${couponCode}\` (-${discount}%)\n💰 **Novo Valor com Desconto:** \`R$ ${finalPrice.toFixed(2)}\``;
   } else if (couponCode) {
-    descText += `\n❌ *Cupom \`${couponCode}\` inválido ou não encontrado (seguindo preço normal).*`;
+    descText += `\n❌ *Cupom \`${couponCode}\` inválido ou não encontrado.*`;
   }
 
   const pix = db.data.pix;
@@ -455,11 +489,7 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
     components: [actionRow] 
   });
 
-  if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
-  } else {
-    await interaction.reply({ content: `✅ Carrinho criado com sucesso: ${ticketChannel}`, ephemeral: true });
-  }
+  await interaction.reply({ content: `✅ Seu carrinho foi criado em ${ticketChannel}!`, ephemeral: true });
 }
 
 client.login(process.env.DISCORD_TOKEN);
