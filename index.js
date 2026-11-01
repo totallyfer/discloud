@@ -22,7 +22,7 @@ const commands = [
     .setDescription('Painel avançado de configuração da loja')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
-      sub.setName('shop').setDescription('Gerencia produtos, cupons, Pix, cargos e visual da loja')
+      sub.setName('shop').setDescription('Gerencia produtos, cupons, Pix, cargos, emojis e visual da loja')
     ),
   new SlashCommandBuilder()
     .setName('start')
@@ -38,7 +38,7 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
-  console.log(`Bot conectado como ${client.user.tag} (Painel Padrão Visual IDêntico)`);
+  console.log(`Bot conectado como ${client.user.tag} (Sistema com Emojis Personalizáveis)`);
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
@@ -53,7 +53,7 @@ const userSessions = new Map();
 client.on('interactionCreate', async interaction => {
   db.read();
 
-  // Valores padrão estruturados igualzinho ao modelo de referência
+  // Valores padrão de inicialização
   db.data.shopEmbed = db.data.shopEmbed || {
     title: '🛒 Compre Aqui',
     description: '✨ **ESCOLHA UMA DAS OPÇÕES PARA COMPRAR!**\n\n' +
@@ -62,8 +62,23 @@ client.on('interactionCreate', async interaction => {
     color: '#E02B2B',
     image: 'https://images.unsplash.com/photo-1607532940433-1d604d1efc91?w=800&auto=format&fit=crop&q=60'
   };
+
+  // Emojis customizáveis (padrão)
+  db.data.emojis = db.data.emojis || {
+    cart: '🛍️',
+    support: '🎧',
+    pix: '🔑',
+    notify: '📩',
+    cancel: '❌',
+    confirm: '✅',
+    lock: '🔒',
+    coupon: '🎟️'
+  };
+
   db.data.staffRoleId = db.data.staffRoleId || null;
   db.data.tickets = db.data.tickets || {};
+
+  const e = db.data.emojis;
 
   if (interaction.isChatInputCommand()) {
     const { commandName, options } = interaction;
@@ -74,11 +89,11 @@ client.on('interactionCreate', async interaction => {
 
         const embed = new EmbedBuilder()
           .setTitle('⚙️ Painel de Controle Avançado da Loja')
-          .setDescription('Gerencie produtos, cupons, chaves Pix, **cargo da equipe** e personalize a embed:')
+          .setDescription('Gerencie produtos, cupons, chaves Pix, **cargo da equipe** e personalize a embed/emojis:')
           .addFields(
             { name: '📦 Produtos', value: `${Object.keys(db.data.products).length} cadastrados`, inline: true },
             { name: '💳 Pix', value: db.data.pix.value ? 'Configurado ✅' : 'Pendente ❌', inline: true },
-            { name: '🛡️ Cargo de Aprovação', value: staffRoleText, inline: true }
+            { name: '🛡️ Cargo Staff', value: staffRoleText, inline: true }
           )
           .setColor('#8A2BE2');
 
@@ -96,6 +111,7 @@ client.on('interactionCreate', async interaction => {
 
         const row3 = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('cfg_edit_embed').setLabel('✏️ Personalizar Embed').setStyle(ButtonStyle.Secondary).setEmoji('🎨'),
+          new ButtonBuilder().setCustomId('cfg_edit_emojis').setLabel('😀 Personalizar Emojis').setStyle(ButtonStyle.Secondary),
           new ButtonBuilder().setCustomId('cfg_preview_embed').setLabel('👁️ Visualizar Embed').setStyle(ButtonStyle.Secondary)
         );
 
@@ -111,26 +127,24 @@ client.on('interactionCreate', async interaction => {
 
         const cfg = db.data.shopEmbed;
         
-        // A ordem exata: Título ➔ Descrição ➔ Imagem/Banner embaixo
         const shopEmbed = new EmbedBuilder()
           .setTitle(cfg.title)
           .setDescription(cfg.description)
           .setColor(cfg.color)
-          .setImage(cfg.image); // Banner posicionado exatamente abaixo da descrição
+          .setImage(cfg.image);
 
-        // Botões idênticos ao layout da imagem de referência
         const row1 = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('btn_create_cart').setLabel('Criar Carrinho').setStyle(ButtonStyle.Success).setEmoji('🛍️'),
-          new ButtonBuilder().setCustomId('btn_support').setLabel('Atendente').setStyle(ButtonStyle.Danger).setEmoji('🎧')
+          new ButtonBuilder().setCustomId('btn_create_cart').setLabel('Criar Carrinho').setStyle(ButtonStyle.Success).setEmoji(e.cart),
+          new ButtonBuilder().setCustomId('btn_support').setLabel('Atendente').setStyle(ButtonStyle.Danger).setEmoji(e.support)
         );
 
         await channel.send({ embeds: [shopEmbed], components: [row1] });
-        await interaction.reply({ content: `✅ Painel de vendas estilo idêntico publicado em ${channel}!`, ephemeral: true });
+        await interaction.reply({ content: `✅ Painel publicado em ${channel}!`, ephemeral: true });
       }
     }
   }
 
-  // --- INTERAÇÕES DE BOTÕES E FLUXO ---
+  // --- INTERAÇÕES DE BOTÕES ---
   else if (interaction.isButton()) {
     const { customId } = interaction;
 
@@ -139,7 +153,7 @@ client.on('interactionCreate', async interaction => {
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_id').setLabel('ID Único (ex: vip1)').setStyle(TextInputStyle.Short).setRequired(true)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_name').setLabel('Nome do Produto').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_price').setLabel('Preço (Apenas números, ex: 15.00)').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_price').setLabel('Preço (ex: 15.00)').setStyle(TextInputStyle.Short).setRequired(true)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prod_desc').setLabel('Descrição').setStyle(TextInputStyle.Paragraph).setRequired(true))
       );
       await interaction.showModal(modal);
@@ -183,6 +197,19 @@ client.on('interactionCreate', async interaction => {
       await interaction.showModal(modal);
     }
 
+    // MODAL PARA PERSONALIZAR EMOJIS
+    if (customId === 'cfg_edit_emojis') {
+      const modal = new ModalBuilder().setCustomId('modal_edit_emojis').setTitle('Personalizar Emojis do Bot');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('emoji_cart').setLabel('Emoji Carrinho').setValue(e.cart).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('emoji_support').setLabel('Emoji Atendente').setValue(e.support).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('emoji_pix').setLabel('Emoji Copiar Pix').setValue(e.pix).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('emoji_notify').setLabel('Emoji Notificar Pagamento').setValue(e.notify).setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('emoji_confirm').setLabel('Emoji Confirmar Pagamento').setValue(e.confirm).setStyle(TextInputStyle.Short).setRequired(true))
+      );
+      await interaction.showModal(modal);
+    }
+
     if (customId === 'cfg_preview_embed') {
       const cfg = db.data.shopEmbed;
       const previewEmbed = new EmbedBuilder()
@@ -200,7 +227,7 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: `📦 **Produtos:**\n\n${list}`, ephemeral: true });
     }
 
-    // Botão "Atendente" (Suporte)
+    // Botão "Atendente"
     if (customId === 'btn_support') {
       const guild = interaction.guild;
       const supportChannel = await guild.channels.create({
@@ -214,7 +241,7 @@ client.on('interactionCreate', async interaction => {
       });
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Atendimento').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Fechar Atendimento').setStyle(ButtonStyle.Danger).setEmoji(e.lock)
       );
 
       await supportChannel.send({ 
@@ -234,15 +261,16 @@ client.on('interactionCreate', async interaction => {
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId('select_item_cart')
-        .setPlaceholder('📦 Passo 1: Escolha o produto para o carrinho')
+        .setPlaceholder('Escolha o produto para o carrinho')
         .addOptions(products.map(([id, p]) => ({
           label: p.name,
           description: `Preço: R$ ${p.price}`,
-          value: id
+          value: id,
+          emoji: e.cart
         })));
 
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      await interaction.reply({ content: '🛒 **Selecione o produto que você deseja colocar no seu carrinho:**', components: [row], ephemeral: true });
+      await interaction.reply({ content: `${e.cart} **Selecione o produto que você deseja colocar no seu carrinho:**`, components: [row], ephemeral: true });
     }
 
     if (customId === 'btn_confirm_open_ticket') {
@@ -269,8 +297,8 @@ client.on('interactionCreate', async interaction => {
         .setColor('#FFA500');
 
       const staffRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('approve_payment').setLabel('✅ Confirmar Pagamento').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('approve_payment').setLabel('Confirmar Pagamento').setStyle(ButtonStyle.Success).setEmoji(e.confirm),
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Fechar Ticket').setStyle(ButtonStyle.Danger).setEmoji(e.lock)
       );
 
       await interaction.channel.send({ content: staffRoleMention, embeds: [embedNotify], components: [staffRow] });
@@ -295,7 +323,7 @@ client.on('interactionCreate', async interaction => {
         try {
           const buyer = await client.users.fetch(buyerId);
           const dmEmbed = new EmbedBuilder()
-            .setTitle('🎉 Compra Aprovada!')
+            .setTitle(`${e.confirm} Compra Aprovada!`)
             .setDescription(`Seu pagamento no servidor **${interaction.guild.name}** foi confirmado com sucesso!\n\nRetorne ao seu ticket para receber o seu produto.`)
             .setColor('#00FF7F')
             .setTimestamp();
@@ -304,20 +332,20 @@ client.on('interactionCreate', async interaction => {
       }
 
       const approvedEmbed = new EmbedBuilder()
-        .setTitle('✅ Compra Aprovada com Sucesso!')
+        .setTitle(`${e.confirm} Compra Aprovada com Sucesso!`)
         .setDescription('**Espere seu produto ser entregue pela equipe.**')
         .setColor('#00FF7F')
         .setFooter({ text: `Aprovado por ${interaction.user.tag}` });
 
       const closeRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Fechar Ticket').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Fechar Ticket').setStyle(ButtonStyle.Danger).setEmoji(e.lock)
       );
 
       await interaction.update({ embeds: [approvedEmbed], components: [closeRow] });
     }
 
     if (customId === 'close_ticket') {
-      await interaction.reply({ content: '🔒 Fechando este canal em 5 segundos...' });
+      await interaction.reply({ content: `${e.lock} Fechando este canal em 5 segundos...` });
       setTimeout(() => {
         delete db.data.tickets[interaction.channel.id];
         db.write();
@@ -345,6 +373,17 @@ client.on('interactionCreate', async interaction => {
   }
 
   else if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'modal_edit_emojis') {
+      db.data.emojis.cart = interaction.fields.getTextInputValue('emoji_cart').trim();
+      db.data.emojis.support = interaction.fields.getTextInputValue('emoji_support').trim();
+      db.data.emojis.pix = interaction.fields.getTextInputValue('emoji_pix').trim();
+      db.data.emojis.notify = interaction.fields.getTextInputValue('emoji_notify').trim();
+      db.data.emojis.confirm = interaction.fields.getTextInputValue('emoji_confirm').trim();
+      db.write();
+
+      await interaction.reply({ content: '✅ **Todos os emojis do bot foram atualizados com sucesso!** Use `/start shop` novamente se quiser atualizar um painel enviado.', ephemeral: true });
+    }
+
     if (interaction.customId.startsWith('modal_coupon_cart_')) {
       const prodId = interaction.customId.replace('modal_coupon_cart_', '');
       const couponCode = interaction.fields.getTextInputValue('coupon_input').trim().toUpperCase();
@@ -367,11 +406,11 @@ client.on('interactionCreate', async interaction => {
       let summaryText = `📦 **Produto:** ${product.name}\n💰 **Preço:** R$ ${product.price}`;
       if (discount > 0) {
         const novoValor = parseFloat(product.price) * (1 - discount / 100);
-        summaryText += `\n🎟️ **Cupom:** ${couponCode} (-${discount}%)\n💲 **Valor Final:** R$ ${novoValor.toFixed(2)}`;
+        summaryText += `\n${e.coupon} **Cupom:** ${couponCode} (-${discount}%)\n💲 **Valor Final:** R$ ${novoValor.toFixed(2)}`;
       }
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('btn_confirm_open_ticket').setLabel('🛒 Abrir e Finalizar Carrinho').setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId('btn_confirm_open_ticket').setLabel('Abrir e Finalizar Carrinho').setStyle(ButtonStyle.Success).setEmoji(e.cart)
       );
 
       await interaction.reply({ 
@@ -432,6 +471,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode = '') {
+  const e = db.data.emojis;
   const guild = interaction.guild;
   const channelName = `carrinho-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9]/g, '');
   
@@ -455,7 +495,7 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
   if (discount > 0) {
     const valorDesconto = (finalPrice * discount) / 100;
     finalPrice = finalPrice - valorDesconto;
-    descText += `\n🎟️ **Cupom Aplicado:** \`${couponCode}\` (-${discount}%)\n💰 **Novo Valor com Desconto:** \`R$ ${finalPrice.toFixed(2)}\``;
+    descText += `\n${e.coupon} **Cupom Aplicado:** \`${couponCode}\` (-${discount}%)\n💰 **Novo Valor com Desconto:** \`R$ ${finalPrice.toFixed(2)}\``;
   } else if (couponCode) {
     descText += `\n❌ *Cupom \`${couponCode}\` inválido ou não encontrado.*`;
   }
@@ -466,7 +506,7 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
     try {
       const buffer = await QRCode.toBuffer(pix.value);
       qrCodeAttachment = { attachment: buffer, name: 'qrcode.png' };
-    } catch (e) {}
+    } catch (err) {}
   }
 
   const checkoutEmbed = new EmbedBuilder()
@@ -477,9 +517,9 @@ async function criarCarrinhoTicket(interaction, prodId, discount = 0, couponCode
   if (qrCodeAttachment) checkoutEmbed.setImage('attachment://qrcode.png');
 
   const actionRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('copy_pix_key').setLabel('📋 Copiar Pix').setStyle(ButtonStyle.Primary).setEmoji('🔑'),
-    new ButtonBuilder().setCustomId('notify_payment').setLabel('📩 Notificar Pagamento').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('close_ticket').setLabel('❌ Cancelar').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('copy_pix_key').setLabel('Copiar Pix').setStyle(ButtonStyle.Primary).setEmoji(e.pix),
+    new ButtonBuilder().setCustomId('notify_payment').setLabel('Notificar Pagamento').setStyle(ButtonStyle.Success).setEmoji(e.notify),
+    new ButtonBuilder().setCustomId('close_ticket').setLabel('Cancelar').setStyle(ButtonStyle.Danger).setEmoji(e.cancel)
   );
 
   await ticketChannel.send({ 
