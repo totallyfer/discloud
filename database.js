@@ -5,15 +5,14 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const file = path.join(__dirname, 'db.json');
 
-// Estrutura padrão do banco de dados
 const defaultData = {
-  products: {},
-  coupons: {},
-  pix: { type: 'Chave', value: '' },
-  shopChannel: null
+  products: {}, // { id: { name, price, desc, stock } }
+  coupons: {},  // { code: { discountPercent } }
+  pix: { type: 'Chave Pix', value: '' },
+  shopChannel: null,
+  staffRole: null
 };
 
-// Funções de leitura e escrita seguras
 export const db = {
   read() {
     try {
@@ -36,5 +35,4 @@ export const db = {
   data: defaultData
 };
 
-// Inicializa o banco ao carregar
 db.read();
